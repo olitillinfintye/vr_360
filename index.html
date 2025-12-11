@@ -23,6 +23,21 @@
 			::-webkit-scrollbar-thumb {
     			background-color:  rgba(255,255,255,0.5);
 			}
+
+			/* VR mode button */
+			#vr-button {
+				position: absolute;
+				right: 12px;
+				bottom: 12px;
+				z-index: 9999;
+				background: rgba(0,0,0,0.6);
+				color: #fff;
+				border: none;
+				padding: 10px 12px;
+				border-radius: 6px;
+				font-size: 14px;
+				cursor: pointer;
+			}
 		</style>	
 		<link href="styles.css" rel="stylesheet">
 	</head>
@@ -33,6 +48,8 @@
 		<div id="container" style="width:100%;height:100%;">
 		Loading...
 		</div>
+		<!-- VR mode button -->
+		<button id="vr-button" aria-label="Enter VR mode">VR Mode</button>
 		<script type="text/javascript">
 			// create the panorama player with the container
 			pano=new pano2vrPlayer("container");
@@ -40,6 +57,53 @@
 			window.addEventListener("load", function() {
 				pano.readConfigUrlAsync("pano.xml");
 			});
+		</script>
+		<script type="text/javascript">
+			(function(){
+				const vrButton = document.getElementById('vr-button');
+				const container = document.getElementById('container');
+				async function enterVR(){
+					// Request fullscreen first to maximize compatibility with simple VR viewers
+					try{
+						if(container.requestFullscreen){
+							await container.requestFullscreen();
+						}else if(container.webkitRequestFullscreen){
+							await container.webkitRequestFullscreen();
+						}else if(container.msRequestFullscreen){
+							await container.msRequestFullscreen();
+						}
+					}catch(err){
+						console.warn('Fullscreen request failed:', err);
+					}
+					// Attempt WebXR immersive-vr session when available (best-effort)
+					if(navigator.xr && navigator.xr.isSessionSupported){
+						try{
+							const supported = await navigator.xr.isSessionSupported('immersive-vr');
+							if(supported){
+								try{
+									const session = await navigator.xr.requestSession('immersive-vr');
+									console.log('WebXR session started', session);
+									// Note: starting a full WebXR presentation typically requires an XR-compatible renderer.
+									// We keep the session open so VR-capable browsers/devices can present the page.
+									session.addEventListener('end', ()=>{ console.log('XR session ended'); });
+									return;
+								}catch(e){
+									console.warn('Failed to start XR session:', e);
+								}
+							}
+						}catch(e){
+							console.warn('Error checking XR support:', e);
+						}
+					}
+					// If we reach here, either WebXR wasn't available or failed — user is in fullscreen now.
+					try{
+						if(!document.fullscreenElement){
+							alert('Entered fullscreen. If your VR device supports WebXR, open the page in a VR-capable browser to enter immersive VR.');
+						}
+					}catch(e){}
+				}
+				vrButton.addEventListener('click', enterVR);
+			})();
 		</script>
 		<noscript>
 			<p><b>Please enable Javascript!</b></p>
