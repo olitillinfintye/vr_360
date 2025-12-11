@@ -26,8 +26,9 @@
 
 			/* VR mode button */
 			#vr-button {
-				position: absolute;
-				right: 12px;
+				position: fixed;
+				left: 50%;
+				transform: translateX(-50%);
 				bottom: 12px;
 				z-index: 9999;
 				background: rgba(0,0,0,0.6);
@@ -57,6 +58,137 @@
 			window.addEventListener("load", function() {
 				pano.readConfigUrlAsync("pano.xml");
 			});
+		</script>
+		<!-- three.js for VR sphere rendering -->
+		<script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+		<script type="text/javascript">
+			// VR sphere viewer that re-uses pano2vr's canvas as a dynamic texture
+			(function(){
+				const vrButton = document.getElementById('vr-button');
+				let xrSession = null;
+				let renderer, scene, cameraLeft, cameraRight, sphere, texture;
+				let animationId;
+
+				function findPanoCanvas(){
+					const container = document.getElementById('container');
+					// pano2vr may render to a canvas inside the container
+					const cvs = container.querySelector('canvas');
+					if(cvs) return cvs;
+					// try finding any img or video fallback
+					const img = container.querySelector('img');
+					if(img){
+						// draw image to a temporary canvas
+						const tmp = document.createElement('canvas');
+						tmp.width = img.naturalWidth || 2048;
+						tmp.height = img.naturalHeight || 1024;
+						const ctx = tmp.getContext('2d');
+						ctx.drawImage(img,0,0,tmp.width,tmp.height);
+						return tmp;
+					}
+					return null;
+				}
+
+				function createThree(panoCanvas){
+					// create renderer and scene
+					renderer = new THREE.WebGLRenderer({antialias:true});
+					renderer.setPixelRatio(window.devicePixelRatio);
+					renderer.setSize(window.innerWidth, window.innerHeight);
+					renderer.domElement.style.position = 'fixed';
+					renderer.domElement.style.left = '0';
+					renderer.domElement.style.top = '0';
+					renderer.domElement.style.zIndex = 9998;
+					document.body.appendChild(renderer.domElement);
+
+					scene = new THREE.Scene();
+
+					// create inside-out sphere
+					const geometry = new THREE.SphereGeometry(500, 60, 40);
+					geometry.scale(-1,1,1);
+
+					texture = new THREE.CanvasTexture(panoCanvas);
+					texture.needsUpdate = true;
+					const material = new THREE.MeshBasicMaterial({map: texture});
+					sphere = new THREE.Mesh(geometry, material);
+					scene.add(sphere);
+
+					// left / right cameras for stereo fallback
+					cameraLeft = new THREE.PerspectiveCamera(75, (window.innerWidth/2)/window.innerHeight, 0.1, 1100);
+					cameraRight = new THREE.PerspectiveCamera(75, (window.innerWidth/2)/window.innerHeight, 0.1, 1100);
+
+					window.addEventListener('resize', onWindowResize);
+				}
+
+				function onWindowResize(){
+					if(!renderer) return;
+					renderer.setSize(window.innerWidth, window.innerHeight);
+					cameraLeft.aspect = (window.innerWidth/2)/window.innerHeight;
+					cameraLeft.updateProjectionMatrix();
+					cameraRight.aspect = (window.innerWidth/2)/window.innerHeight;
+					cameraRight.updateProjectionMatrix();
+				}
+
+				function animateCardboard(panoCanvas){
+					texture.needsUpdate = true;
+					// small eye separation
+					const eyeSeparation = 0.03;
+					cameraLeft.position.set(-eyeSeparation,0,0);
+					cameraRight.position.set(eyeSeparation,0,0);
+
+					renderer.setScissorTest(true);
+					// left
+					renderer.setScissor(0,0,window.innerWidth/2,window.innerHeight);
+					renderer.setViewport(0,0,window.innerWidth/2,window.innerHeight);
+					renderer.render(scene, cameraLeft);
+					// right
+					renderer.setScissor(window.innerWidth/2,0,window.innerWidth/2,window.innerHeight);
+					renderer.setViewport(window.innerWidth/2,0,window.innerWidth/2,window.innerHeight);
+					renderer.render(scene, cameraRight);
+					renderer.setScissorTest(false);
+					animationId = requestAnimationFrame(()=>animateCardboard(panoCanvas));
+				}
+
+				async function enterWebXR(panoCanvas){
+					if(!navigator.xr) throw new Error('WebXR not available');
+					const supported = await navigator.xr.isSessionSupported('immersive-vr');
+					if(!supported) throw new Error('immersive-vr not supported');
+					xrSession = await navigator.xr.requestSession('immersive-vr');
+					renderer.xr.enabled = true;
+					renderer.xr.setSession(xrSession);
+					// simple render loop using WebXR's animation frame
+					renderer.setAnimationLoop(()=>{
+						texture.needsUpdate = true;
+						renderer.render(scene, cameraLeft); // camera used is controlled by XR
+					});
+					xrSession.addEventListener('end', ()=>{
+						renderer.setAnimationLoop(null);
+						renderer.domElement.remove();
+						renderer = null;
+					});
+				}
+
+				async function startVRSphere(){
+					const panoCanvas = findPanoCanvas();
+					if(!panoCanvas){
+						alert('Could not find the panorama canvas. The VR viewer requires the pano to render into a canvas.');
+						return;
+					}
+					// create three if not created
+					if(!renderer) createThree(panoCanvas);
+					// try WebXR first
+					try{
+						await enterWebXR(panoCanvas);
+						console.log('Entered WebXR');
+						return;
+					}catch(e){
+						console.warn('WebXR start failed or not available:', e);
+					}
+					// fallback: cardboard side-by-side view
+					cancelAnimationFrame(animationId);
+					animateCardboard(panoCanvas);
+				}
+
+				vrButton.addEventListener('click', startVRSphere);
+			})();
 		</script>
 		<script type="text/javascript">
 			(function(){
